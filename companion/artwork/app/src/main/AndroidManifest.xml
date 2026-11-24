@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Provider-only companion, not a home-screen app: deliberately no leanback activity. -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <permission android:name="com.gathin.tvhome.artwork.READ" android:protectionLevel="signature" />
+    <application android:label="Recommendation artwork" android:icon="@android:drawable/ic_menu_gallery"
+        android:allowBackup="false" android:supportsRtl="true" android:usesCleartextTraffic="false">
+        <provider android:name=".ArtworkProvider" android:authorities="com.gathin.tvhome.artwork"
+            android:exported="true" android:permission="com.gathin.tvhome.artwork.READ" />
+    </application>
+</manifest>

@@ -421,6 +421,9 @@ def package_pair_problem(values):
 # free text: `com.netflix.ninja=magenta` - the app's colour where a bundled banner's name goes - is a banner
 # the theme reports as set and the TV never draws, and `banner_tv2` is the same. The names are read out of this
 # checkout's res/ rather than listed here, because the launcher a theme is pushed to is built from this tree.
+# The one other thing the launcher reads there is a package name (it has a dot, which a banner_* name never
+# has): AppAdapter.borrowedBanner() draws that installed app's own TV banner on the tile. Whether that app is
+# on the TV cannot be known here, so a package name is let through.
 LAUNCHER_RES = ROOT / "launcher" / "app" / "src" / "main" / "res"
 BANNER_SUFFIXES = (".xml", ".png", ".webp", ".jpg")
 
@@ -453,9 +456,12 @@ def banner_problem(values, root=ROOT):
         name = text.partition("=")[2].strip()
         if not name:
             continue
+        if "." in name and not name.startswith("banner_"):
+            continue   # another app's package: its banner is borrowed on the TV
         if not name.startswith("banner_"):
             return (f"{entry!r} names {name!r}, and bundledBanner() answers null for a name that does not "
-                    f"start with `banner_`, so the tile keeps the art it had")
+                    f"start with `banner_`, so the tile keeps the art it had (another app's banner is "
+                    f"borrowed by its package name, which has a dot)")
         if name not in have:
             return (f"{entry!r} names {name!r}, which is not a drawable the launcher ships "
                     f"({', '.join(have) if have else 'none'}), so the tile keeps the art it had")

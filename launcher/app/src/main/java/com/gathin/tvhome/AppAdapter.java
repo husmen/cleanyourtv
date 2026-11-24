@@ -300,6 +300,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             // uniform_tiles draws the icon, so an app's banner is never loaded. A module card keeps its banner.
             if (!(uniformTiles && card == null)) {
                 banner = bundledBanner(appBanners.get(pkg));
+                if (banner == null) banner = borrowedBanner(pm, appBanners.get(pkg));
                 if (banner == null) banner = iconTiles.contains(pkg) ? iconBanner(ri.loadIcon(pm)) : loadBanner(pm, ri);
             }
             // The icon is only drawn (and sampled for the glow) when there is no banner, so a tile with a
@@ -361,6 +362,21 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         if (name == null || !name.startsWith("banner_")) return null;
         int id = ctx.getResources().getIdentifier(name, "drawable", ctx.getPackageName());
         return id != 0 ? ctx.getDrawable(id) : null;
+    }
+
+    /**
+     * Another installed app's TV banner, for an app_banners entry that names a package instead of a banner_*
+     * drawable: an open-source client can wear the banner of the stock app it replaces. That app may be
+     * disabled; uninstalled, or with no banner, the answer is null and the tile keeps its own art.
+     */
+    private Drawable borrowedBanner(PackageManager pm, String pkg) {
+        if (pkg == null || pkg.indexOf('.') < 0) return null;
+        Intent leanback = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER).setPackage(pkg);
+        for (ResolveInfo ri : pm.queryIntentActivities(leanback, PackageManager.MATCH_DISABLED_COMPONENTS)) {
+            Drawable banner = ri.activityInfo == null ? null : loadBanner(pm, ri);
+            if (banner != null) return banner;
+        }
+        return null;
     }
 
     private Drawable loadBanner(PackageManager pm, ResolveInfo ri) {

@@ -150,6 +150,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private TextView heroName;
     /** The top shelf: heroName, plus the cinematic shelf's "Last opened" line and dock position dots. */
     private View hero;
+    /** The focused dock app's recommendation rows under the dock (config.xml, recommendation_shelf); null when off. */
+    private RecommendationShelf recommendations;
+    /** With the recommendation shelf, the dock band's edge takes the hue of the glow behind it (DockDecoration.litEdge). */
+    private boolean dockLit;
     private TextView heroMeta;
     private LinearLayout heroDots;
     /** Cinematic top shelf (config.xml, cinematic_home): the focused dock app's artwork behind a larger shelf. */
@@ -519,6 +523,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glass.setStyle(cfg.glassStyle);
         if (festive) glass.setAccent(festival.accentColor());
         ambient = findViewById(R.id.ambient);
+        dockLit = cfg.recommendationShelf && dockRow;
         // The glow is one bitmap, so its alpha can be applied while drawing it. Otherwise every frame of
         // a fade renders it into a full-screen offscreen buffer first.
         ambient.forceHasOverlappingRendering(false);
@@ -545,6 +550,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (!cfg.dockTitle) hero.setVisibility(View.GONE);
         greeting = findViewById(R.id.greeting);
         clockBlock = findViewById(R.id.leftBlock);
+        if (cfg.recommendationShelf) {
+            // 24dp under the tiles, and 29dp more for their names when always_show_names keeps them there.
+            recommendations = new RecommendationShelf(this, () -> focusTile(lastFocused),
+                    cfg.alwaysShowNames ? 53 : 24);
+            root.addView(recommendations);
+            // The shelf names the app under the dock; above a dock at the top the title would cover the clock.
+            hero.setVisibility(View.GONE);
+        }
         clockRefresh = new ClockRefresh(clockBlock);
         greetingColor = greeting.getCurrentTextColor();
         if (!cfg.showGreeting) greeting.setVisibility(View.GONE);
@@ -689,7 +702,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             }
         });
         if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding, cfg.dockBand,
-                singleRow, cfg.dockBandAll));
+                singleRow, cfg.dockBandAll, cfg.recommendationShelf, !dockLit ? null
+                : () -> Math.round(ambient.getAlpha() * 255) << 24 | ambientColor & 0xFFFFFF));
+        // The band is redrawn on every frame of the glow's fades; setAmbient covers its colour changes.
+        if (dockLit) ambient.animate().setUpdateListener(animation -> grid.invalidate());
         if (cfg.fadeRows) TopFade.attach(grid, 48 * density);
         // Reduced motion: the tiles are simply there, with no entrance (reloadApps skips it there too).
         if (animations && !reducedMotion) {
@@ -726,6 +742,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             // A single row never shows the names under its tiles (the title above the row names the app), so the
             // 7dp gap and 22dp label item_app.xml keeps for them would only lift the row: sit it that much lower.
             if (singleRow && !cfg.alwaysShowNames) want += (int) (29 * density);
+            // The recommendation shelf takes the screen under the row, so the row sits at the top.
+            if (recommendations != null) want = (int) (AppAdapter.TOP_ROOM_DP * density);
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
                 // A vertical grid parks the dock on the new padding line by scrolling (onTileFocused); a sideways
@@ -1117,6 +1135,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         restartIdleClock();
         promptsPaused = false;
+        if (recommendations != null) recommendations.resume();
         if (grid.getAdapter() == null) grid.setAdapter(adapter);   // dropped by onTrimMemory
         switch (tileRefresh.onResume(packagesChangedSinceRebuild())) {
             case REBUILD:
@@ -1166,6 +1185,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** Launcher settings' change count (Config.SETTINGS_REVISION_KEY); onResume rebuilds Home when it moved. */
     private long settingsRevision() {
         return getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).getLong(Config.SETTINGS_REVISION_KEY, 0);
+    }
+
+    /** The answer to the recommendation shelf's request to read TV listings: granted, it starts reading. */
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == RecommendationShelf.PERMISSION_REQUEST && recommendations != null && resumed) {
+            recommendations.resume();
+        }
     }
 
     /**
@@ -1318,6 +1346,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onPause() {
         super.onPause();
+        if (recommendations != null) recommendations.pause();
         resumed = false;
         // No UP reaches a paused Home, so a vendor-key hold it saw go down would still open its app later.
         // Only Home's own share is dropped: a key service that saw the same DOWN keeps its hold.
@@ -1366,6 +1395,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // RUNNING_LOW and CRITICAL also arrive while Home is visible when an accessibility service keeps the
         // process in the foreground; never blank the screen the owner is looking at.
         if (!MemoryTrimPolicy.shouldRelease(level, started)) return;
+        if (recommendations != null) recommendations.trim();
         adapter.clear();
         // Detach the adapter too: with Home stopped no layout pass runs, so the tile views (and the bitmaps
         // they hold) would stay attached until Home comes back. setAdapter(null) recycles them now.
@@ -1398,6 +1428,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (recommendations != null) recommendations.close();
         ViewTreeObserver tree = getWindow().getDecorView().getViewTreeObserver();
         if (tree.isAlive()) tree.removeOnGlobalFocusChangeListener(glassFocusListener);
         RemoteKeys.release(this);
@@ -1538,6 +1569,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /** The start shared by reorder and edit-dock mode. False when there is nothing to move. */
     private boolean beginReorder() {
         if (adapter.movableCount() < 2) return false;
+        if (recommendations != null) recommendations.hide();
         // Before the reload below: once it has dropped the empty slots, the dock row also shows grid apps.
         dockInSession = new HashSet<>();
         dockedAtStart = adapter.dockFilled();
@@ -1789,6 +1821,11 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     @Override
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
+        // Back in the recommendation shelf returns to the dock tile it was entered from.
+        if (recommendations != null && recommendations.hasFocus()) {
+            focusTile(lastFocused);
+            return;
+        }
         // Home screen: Back goes nowhere, unless back_opens_clock is on.
         if (backOpensClock) startActivity(new Intent(this, ClockActivity.class));
     }
@@ -1902,6 +1939,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 else grid.smoothScrollBy(0, dy);
             }
             showHero(position, scroll ? r.top - dy : r.top);
+            if (recommendations != null && !reordering) {
+                recommendations.select(adapter.packageAt(position), adapter.labelAt(position), r.bottom);
+            }
         } else {
             // Below the dock (or in a plain grid) the glow follows the tile without the big name; letting it
             // fade out left the grid on plain black.
@@ -2143,6 +2183,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      * so changing apps neither repaints it on the CPU (about 11 ms) nor uploads it again.
      */
     private void setAmbient(int color) {
+        if (dockLit) grid.invalidate();   // the band's edge follows the glow
         if (color == ambientColor && ambient.getBackground() != null) return;
         ambientColor = color;
         BitmapDrawable glow = (BitmapDrawable) ambient.getBackground();
@@ -2248,6 +2289,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     private void hideHero() {
+        if (recommendations != null) recommendations.hide();
         if (!heroShown) return;
         stopAmbientAnimation();
         hero.animate().cancel();
@@ -2262,6 +2304,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             hero.setAlpha(0f);
             ambient.setAlpha(0f);
             heroArt.setAlpha(0f);
+            if (dockLit) grid.invalidate();
         }
     }
 
@@ -2458,14 +2501,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int count = adapter.appCount();
         int target;
         if (singleRow) {
-            // One row: Up leaves for the top bar, Down has nowhere to go, and Left/Right walk the whole row,
-            // stopping at its two ends (the default focus search scrolls the row to the next tile).
+            // One row: Up leaves for the top bar, Down has nowhere to go but the recommendation shelf when it is
+            // on, and Left/Right walk the whole row, stopping at its two ends (the default focus search scrolls
+            // the row to the next tile).
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return false;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) return true;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                if (recommendations != null) recommendations.enter();
+                return true;
+            }
             boolean forward = rtlAppGrid ? keyCode == KeyEvent.KEYCODE_DPAD_LEFT : keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
             int last = adapter.focusablePosition(count - 1);
             if (forward && position >= last) {
                 if (adapter.isLibraryAt(count)) focusLibrary();
+                return true;
+            }
+            // With the shelf's cards below, step by hand: the focus search must not pick one of them.
+            if (recommendations != null) {
+                int next = position + (forward ? 1 : -1);
+                if (next >= 0 && next <= last) focusTile(next);
                 return true;
             }
             return !forward && position == 0;
@@ -3770,7 +3823,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     /**
      * Hold OK on a tile: a glass menu next to it. Move starts reorder mode with this tile already picked up;
      * Remove from Home takes the shortcut off (only with the app library on, where one press adds it back);
-     * App info opens the TV's page for the app, which is what holding OK used to do.
+     * App info opens the TV's page for the app, which is what holding OK used to do. With the recommendation
+     * shelf on, Recommendations opens the app's category chooser.
      */
     // ---- hold OK ---------------------------------------------------------------------------------
     // View's own long click misses on some remotes: an IR remote that sends its repeat frames as separate
@@ -3881,6 +3935,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             if (LibraryApps.save(this, pkg, false)) reloadApps(false);
             else Toast.makeText(this, R.string.library_save_failed, Toast.LENGTH_LONG).show();
         });
+        if (recommendations != null) addSettingsMenuRow(rows, popup, R.string.recommendation_menu,
+                () -> recommendations.configure(pkg, adapter.labelAt(adapter.positionOf(key))));
         // Some firmware has no App info page at all; a row that only toasts "can't open" helps nobody.
         Intent info = SystemSettings.appInfo(this, pkg);
         if (info != null) addSettingsMenuRow(rows, popup, R.string.library_app_info, () -> open(info));

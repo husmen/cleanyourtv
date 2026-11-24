@@ -55,6 +55,10 @@ SHIPPED = {
     "android.permission.ACCESS_FINE_LOCATION",
     "android.permission.WRITE_SECURE_SETTINGS",
     "yandex.tv.permission.ACCESS_TV_SOURCE",
+    # Bespoke recommendation branch (FORK.md): public app-published TV metadata, requested at runtime.
+    "android.permission.READ_TV_LISTINGS",
+    # Same-signature access to the separate artwork provider; not a socket/network permission here.
+    "com.gathin.tvhome.artwork.READ",
 }
 
 # The shapes a network connection is opened with, in plain Java and in the libraries that wrap it. A

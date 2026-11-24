@@ -2,7 +2,10 @@ package com.gathin.tvhome;
 
 import android.graphics.Canvas;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
@@ -10,6 +13,8 @@ import android.view.View;
 
 import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
+
+import java.util.function.IntSupplier;
 
 /** Draws the tvOS style lighter band behind the first (dock) row and adds a gap below it. */
 public class DockDecoration extends RecyclerView.ItemDecoration {
@@ -34,6 +39,18 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private final boolean singleRow;
     /** dock_band_all: in a single row, the band runs behind every app instead of the dock apps only. */
     private final boolean bandAll;
+    /**
+     * In a single row whose band covers the dock apps only, leave the band's right end open and fade it out
+     * under the first app after the dock, instead of closing it with a rounded end against that app.
+     */
+    private final boolean openEnd;
+    /** Erases the open end: transparent at 0, opaque at 1, stretched over the fade by fadeSpan. */
+    private final Paint fade = new Paint();
+    private final Matrix fadeSpan = new Matrix();
+    /** The edge's own colour, kept for {@link #litEdge} to blend from. */
+    private final int plainEdge;
+    /** The glow behind the dock, as its colour with its strength in the alpha byte; null leaves the edge plain. */
+    private final IntSupplier glow;
 
     /**
      * @param translucent the cinematic shelf's band: the artwork and the glow show through it.
@@ -44,12 +61,20 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
      * @param bandVisible false skips the band and its edge, so the tiles float on the wallpaper (dock_band).
      * @param singleRow   every app sits in the dock's row (single_row); the band covers the dock apps only, unless bandAll.
      * @param bandAll     with singleRow, the band runs behind every app in the row (dock_band_all).
+     * @param openEnd     with singleRow and not bandAll, the band's right end is open and fades out past the dock.
+     * @param glow        read at every draw: the glow behind the dock, its strength in the alpha byte, for the
+     *                    band's edge to take its hue; null leaves the edge plain.
      */
     DockDecoration(int dockSize, float density, boolean translucent, boolean names, int opacity, boolean lightGlass,
-                   boolean evenPadding, boolean bandVisible, boolean singleRow, boolean bandAll) {
+                   boolean evenPadding, boolean bandVisible, boolean singleRow, boolean bandAll, boolean openEnd,
+                   IntSupplier glow) {
+        this.glow = glow;
         this.dockSize = dockSize;
         this.singleRow = singleRow;
         this.bandAll = singleRow && bandAll;
+        this.openEnd = singleRow && !bandAll && openEnd;
+        fade.setShader(new LinearGradient(0, 0, 1, 0, 0x00000000, 0xFF000000, Shader.TileMode.CLAMP));
+        fade.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_OUT));
         this.density = density;
         this.namesRoom = names ? 22 * density : 0;
         this.lightGlass = lightGlass;
@@ -58,7 +83,33 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         band.setColor(translucent ? 0x8C121014 : (Math.round(opacity * 2.55f) << 24) | 0x141416);
         edge.setStyle(Paint.Style.STROKE);
         edge.setStrokeWidth(density);
-        edge.setColor(lightGlass ? 0x38FFFFFF : translucent ? 0x26FFFFFF : 0x1FFFFFFF);
+        plainEdge = lightGlass ? 0x38FFFFFF : translucent ? 0x26FFFFFF : 0x1FFFFFFF;
+        edge.setColor(plainEdge);
+    }
+
+    /**
+     * The band's edge as if lit by the glow behind it: the glow's own hue, pale (HSV saturation 0.35, value
+     * 0.87) at 55% opacity, blended in from the plain edge as the glow comes up. A grey glow has no hue to
+     * lend and leaves the edge plain.
+     *
+     * @param plain the edge's own ARGB colour
+     * @param glow  the glow's RGB colour, with its strength (the glow view's alpha) in the alpha byte
+     */
+    static int litEdge(int plain, int glow) {
+        int strength = glow >>> 24;
+        int[] rgb = {(glow >> 16) & 0xFF, (glow >> 8) & 0xFF, glow & 0xFF};
+        int max = Math.max(rgb[0], Math.max(rgb[1], rgb[2])), min = Math.min(rgb[0], Math.min(rgb[1], rgb[2]));
+        if (strength == 0 || max - min < 0.15f * max) return plain;
+        int lit = 0x8C;   // 55% opacity
+        for (int channel : rgb) {
+            lit = lit << 8 | Math.round(0.87f * 255 * (1 - 0.35f * (max - channel) / (max - min)));
+        }
+        int edge = 0;
+        for (int shift = 24; shift >= 0; shift -= 8) {
+            int from = (plain >> shift) & 0xFF, to = (lit >> shift) & 0xFF;
+            edge |= (from + (to - from) * strength / 255) << shift;
+        }
+        return edge;
     }
 
     /** Concentric corners: the band's radius is the tiles' radius plus the band's padding around them. */
@@ -90,6 +141,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         if (!bandVisible) return;
         boolean any = false;
         int cardWidth = 0;
+        // The last dock tile's right edge and its cell's width, when it is on screen: where an open end fades.
+        float tail = Float.NaN, cell = 0;
         for (int i = 0; i < parent.getChildCount(); i++) {
             View child = parent.getChildAt(i);
             int pos = parent.getChildAdapterPosition(child);
@@ -102,6 +155,10 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             float r = l + card.getWidth();
             float b = t + card.getHeight();
             cardWidth = card.getWidth();
+            if (pos == dockSize - 1) {
+                tail = r;
+                cell = child.getWidth();
+            }
             if (!any) {
                 rect.set(l, t, r, b);
                 any = true;
@@ -146,7 +203,22 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
             shaderTop = rect.top;
             shaderBottom = rect.bottom;
         }
+        if (glow != null) edge.setColor(litEdge(plainEdge, glow.getAsInt()));
+        if (!openEnd || Float.isNaN(tail) || state.getItemCount() <= dockSize) {
+            c.drawRoundRect(rect, radius, radius, band);
+            c.drawRoundRect(rect, radius, radius, edge);
+            return;
+        }
+        // Open end: the band runs on under the next app and is erased along the way, its rounded end past the fade.
+        float end = Math.min(tail + cell, parent.getWidth());
+        rect.right = end + radius;
+        int layer = c.saveLayer(rect.left - density, rect.top - density, end, rect.bottom + density, null);
         c.drawRoundRect(rect, radius, radius, band);
         c.drawRoundRect(rect, radius, radius, edge);
+        fadeSpan.setScale(end - tail, 1);
+        fadeSpan.postTranslate(tail, 0);
+        fade.getShader().setLocalMatrix(fadeSpan);
+        c.drawRect(tail, rect.top - density, end, rect.bottom + density, fade);
+        c.restoreToCount(layer);
     }
 }

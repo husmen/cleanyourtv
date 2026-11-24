@@ -162,6 +162,12 @@ class BannerNameTest(ThemeSetCase):
         self.refused('["com.netflix.ninja=magenta"]', "app_banners", "does not start with `banner_`")
         self.refused('["com.netflix.ninja=Netflix"]', "app_banners", "does not start with `banner_`")
 
+    def test_another_apps_package_is_written(self):
+        """A package name in the banner half borrows that app's banner on the TV, so set writes it as given."""
+        entry = "app.smarttube.fdroid=com.google.android.youtube.tv"
+        self.assertIsNone(self.set_key(json.dumps([entry]), "app_banners"))
+        self.assertEqual([entry], self.written()["app_banners"])
+
     def test_a_banner_the_launcher_does_not_ship_is_refused(self):
         text = self.refused('["com.netflix.ninja=banner_tv2"]', "app_banners", "banner_tv2")
         # The refusal names the names that would work, so the reader does not have to look them up.

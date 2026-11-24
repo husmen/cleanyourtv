@@ -91,7 +91,8 @@
     <string-array name="app_labels">
     </string-array>
     <!-- A tile's artwork instead of the app's banner: "package=drawable", a banner_* drawable bundled with the
-         launcher (res/drawable). banner_tv is a magenta field with the Live TV glyph. -->
+         launcher (res/drawable). banner_tv is a magenta field with the Live TV glyph. A package name in place
+         of the drawable borrows that installed app's own TV banner, disabled or not. -->
     <string-array name="app_banners">
     </string-array>
 
@@ -464,6 +465,13 @@
     <!-- Module cards: an app that declares a card (docs/specs/card.md) can stand in for its tile with its own
          label, caption and glow colour, once you answer Show on the prompt. false: never look for cards or ask. -->
     <bool name="module_cards">true</bool>
+
+    <!-- Bespoke branch: the dock at the top of the screen and, under it, the focused dock app's
+         recommendations: one sideways row per Watch Next type and preview channel, the title under each
+         artwork. Needs single_row (columns 6 gives six slots); off by default, and a theme can turn it on
+         with "recommendation_shelf". Needs TV listings permission; the optional artwork companion handles
+         HTTPS posters without adding network access here. -->
+    <bool name="recommendation_shelf">false</bool>
 
     <!-- Reduced motion: for TVs whose GPU cannot keep up (MediaTek MT5895 on Android 10 is the known case).
          true keeps the GPU drawing path but calms the movement and draws far fewer frames: the highlight

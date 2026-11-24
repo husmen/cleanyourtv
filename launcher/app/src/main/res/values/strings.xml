@@ -158,4 +158,16 @@
     <string name="clock_format_system">System</string>
     <string name="clock_format_12">12-hour</string>
     <string name="clock_format_24">24-hour</string>
+    <!-- Bespoke recommendation shelf; channel names and media titles come from their publishing apps. -->
+    <string name="recommendation_continue" translatable="false">Continue watching</string>
+    <string name="recommendation_next" translatable="false">Next episode</string>
+    <string name="recommendation_new" translatable="false">New arrivals</string>
+    <string name="recommendation_watchlist" translatable="false">Watchlist</string>
+    <string name="recommendation_allow" translatable="false">Allow shared TV recommendations</string>
+    <string name="recommendation_menu" translatable="false">Recommendations</string>
+    <string name="recommendation_loading" translatable="false">Loading shared categories…</string>
+    <string name="recommendation_retry" translatable="false">Couldn’t read shared categories. Select to retry.</string>
+    <string name="recommendation_categories" translatable="false">Categories from %1$s</string>
+    <string name="recommendation_channel" translatable="false">Channel · %1$s</string>
+    <string name="recommendation_cannot_open" translatable="false">This app couldn’t open the selected item.</string>
 </resources>
